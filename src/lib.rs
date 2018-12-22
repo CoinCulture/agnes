@@ -73,16 +73,14 @@ enum Event {
     PrecommitAny(i64),
     PrecommitValue(i64, Value),
     RoundSkip(i64),
-    RoundSkipProposer(i64, Value),
     TimeoutPropose(i64),
     TimeoutPrevote(i64),
     TimeoutPrecommit(i64),
-    TimeoutPrecommitProposer(i64, Value),
 }
 
 // Message is returned.
 enum Message {
-    NewRound,
+    NewRound(i64),
     Proposal(Proposal),
     Prevote(Vote),
     Precommit(Vote),
@@ -162,10 +160,8 @@ impl State{
             (RoundStep::Precommit, Event::PolkaValue(r, v)) if round == r => { handle_polka_value_precommit(s, v) } // 36/42 - only once?
             (_,                    Event::PrecommitAny(r)) if round == r => { handle_precommit_any(s) } // 47
             (_,                    Event::PrecommitValue(r, v)) => { handle_precommit_value(s, r, v) } // 49
-            (_,                    Event::RoundSkipProposer(r, v)) if round < r => { handle_new_round_proposer(s, r, v) } // 55
-            (_,                    Event::RoundSkip(r)) if round < r => { handle_new_round(s, r) } // 55
-            (_,                    Event::TimeoutPrecommitProposer(r, v)) if round == r=> { handle_new_round_proposer(s, r+1, v) } // 65
-            (_,                    Event::TimeoutPrecommit(r)) => { handle_new_round(s, r+1) } // 65
+            (_,                    Event::RoundSkip(r)) if round < r => { handle_round_skip(s, r) } // 55
+            (_,                    Event::TimeoutPrecommit(r)) if round == r => { handle_round_skip(s, r+1) } // 65
             _ => { (s, None) }
         };
         (s, m)
@@ -275,6 +271,10 @@ fn handle_precommit_value(s: State, r: i64, v: Value) -> (State, Option<Message>
 fn handle_timeout_precommit(s: State, r: i64) -> (State, Option<Message>) {
     let s = s.set_step(RoundStep::Precommit);
     (s, Some(Message::Precommit(Vote::new(s.round, None))))
+}
+
+fn handle_round_skip(s: State, r: i64) -> (State, Option<Message>) {
+    (s, Some(Message::NewRound(r)))
 }
 
 
