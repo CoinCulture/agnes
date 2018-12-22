@@ -1,9 +1,13 @@
 
-// Value is what the consensus reaches agreement on.
+// RoundValue contains a Value and the round it was set.
 #[derive(Copy, Clone, PartialEq)]
-struct Value{
-    value: i64,
+struct RoundValue{
+    round: i64,
+    value: Value
 }
+// Value is the value the consensus seeks agreement on.
+#[derive(Copy, Clone, PartialEq)]
+struct Value{}
 
 
 // ValueManager gets and validates values.
@@ -18,10 +22,8 @@ struct State{
     height: i64,
     round: i64,
     step: RoundStep,
-    locked_value: Option<Value>,
-    locked_round: i64,
-    valid_value: Option<Value>,
-    valid_round: i64,
+    locked: Option<RoundValue>,
+    valid: Option<RoundValue>,
 }
 
 impl State{
@@ -148,10 +150,8 @@ impl<V> StateWrapper<V>
                 height: height,
                 round: 0,
                 step: RoundStep::NewRound,
-                locked_value: None,
-                locked_round: -1,
-                valid_value: None,
-                valid_round: -1,
+                locked: None,
+                valid: None,
             },
             value_manager: value_manager,
         }
@@ -190,11 +190,11 @@ impl<V> StateWrapper<V>
     // 11/14
     fn handle_new_round_proposer(&self, h: i64, r: i64) -> (State, Option<Message>) {
         let s = self.state.update_round(r).update_step(RoundStep::Propose);
-        let proposal_value = match s.valid_value{
-            Some(v) => { v }
-            None    => { self.value_manager.get_value() }
+        let (proposal_value, valid_round) = match s.valid {
+            Some(v) => { (v.value, v.round) }
+            None    => { (self.value_manager.get_value(), -1) }
         };
-        (s, Some(Message::Proposal(Proposal::new(h, r, proposal_value, s.valid_round))))
+        (s, Some(Message::Proposal(Proposal::new(h, r, proposal_value, valid_round))))
     }
 
 
@@ -211,8 +211,8 @@ impl<V> StateWrapper<V>
         let s = self.state.update_step(RoundStep::Prevote);
         let prevote_value = match self.value_manager.validate(proposed_value) {
             false => { None } // its not valid, prevote nil
-            true => match s.locked_value {
-                Some(v) if proposed_value != v => { None } // locked but the vals dont match, prevote nil
+            true => match s.locked {
+                Some(v) if proposed_value != v.value => { None } // locked but the vals dont match, prevote nil
                 _ => { Some(proposed_value) } // otherwise, prevote the value
             }
         };
@@ -225,9 +225,9 @@ impl<V> StateWrapper<V>
         let s = self.state.update_step(RoundStep::Prevote);
         let prevote_value = match self.value_manager.validate(proposed_value) {
             false => { None } // its not valid, prevote nil
-            true => match s.locked_value {
-                Some(v) if s.locked_round <= vr => { Some(proposed_value) } // unlock and prevote
-                Some(v) if v == proposed_value  => { Some(proposed_value) } // already locked on value
+            true => match s.locked {
+                Some(v) if v.round <= vr => { Some(proposed_value) } // unlock and prevote
+                Some(v) if v.value == proposed_value  => { Some(proposed_value) } // already locked on value
                 _ => { None } // otherwise, prevote nil
             }
         };
