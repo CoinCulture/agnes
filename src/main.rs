@@ -15,6 +15,17 @@ struct State{
     ValidRound: i64,
 }
 
+// StateWrapper contains the State, along with closures
+// for getting the current proposer and proposing a new value.
+struct StateWrapper<P, V>
+    where P: Fn(i64) -> i64,
+          V: Fn() -> Value
+{ 
+    State: State,
+    GetProposer: P,
+    GetValue: V,
+}
+
 // RoundStep is the step of the consensus in the round.
 #[derive(Copy, Clone)]
 enum RoundStep {
@@ -57,22 +68,37 @@ struct Proposal{}
 struct Vote{}
 struct Timeout{}
 
-impl State {
-    fn new(height: i64) -> State {
-        State{
-            Height: height,
-            Round: 0,
-            Step: RoundStep::NewRound,
-            LockedValue: None,
-            LockedRound: -1,
-            ValidValue: None,
-            ValidRound: -1, 
+impl<P,V> StateWrapper<P, V>
+    where P: Fn(i64) -> i64,
+          V: Fn() -> Value
+{
+    fn new(height: i64, get_proposer: P, get_value: V) -> StateWrapper<P,V>{
+        StateWrapper{
+            State: State{
+                Height: height,
+                Round: 0,
+                Step: RoundStep::NewRound,
+                LockedValue: None,
+                LockedRound: -1,
+                ValidValue: None,
+                ValidRound: -1,
+            },
+            GetProposer: get_proposer,
+            GetValue: get_value,
         }
     }
 
-    fn next(self, event: Event) -> (State, Option<Message>) {
-        let s = self;
-        match (s.Step, event) {
+    fn with_state(self, state: State) -> StateWrapper<P,V>{
+        StateWrapper{
+            State: state,
+            GetProposer: self.GetProposer,
+            GetValue: self.GetValue,
+        }
+    }
+
+    fn next(self, event: Event) -> (StateWrapper<P,V>, Option<Message>) {
+        let s = self.State;
+        let (s, m) = match (s.Step, event) {
             (RoundStep::NewRound, Event::NewRound(h, r)) => {   handle_new_round(s, h, r) } // 11
             (RoundStep::Propose, Event::Proposal(h, r, v)) => {   handle_proposal(s, h, r, v) } // 22
             (RoundStep::Propose, Event::ProposalPolka(h, r, vr, v)) => {  handle_proposal_polka(s, h, r, vr, v) } // 28
@@ -86,8 +112,9 @@ impl State {
             (_,                    Event::CommitValue(h, r, v)) => {  handle_commit_value(s, h, r, v) } // 49
             (_,                    Event::CertValue(h, r, v)) => {  handle_cert_value(s, h, r, v) } // 55
             (_,                    Event::TimeoutPrecommit(h, r)) => {  handle_timeout_precommit(s, h, r) } // 65
-            _ => { (self, None) }
-        }
+            _ => { (s, None) }
+        };
+        (self.with_state(s), m)
     }
 }
 
