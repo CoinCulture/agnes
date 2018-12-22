@@ -6,13 +6,13 @@ struct Value{}
 // State is the state of the consensus.
 #[derive(Copy, Clone)]
 struct State{
-    Height: i64,
-    Round: i64,
-    Step: RoundStep,
-    LockedValue: Option<Value>,
-    LockedRound: i64,
-    ValidValue: Option<Value>,
-    ValidRound: i64,
+    height: i64,
+    round: i64,
+    step: RoundStep,
+    locked_value: Option<Value>,
+    locked_round: i64,
+    valid_value: Option<Value>,
+    valid_round: i64,
 }
 
 // StateWrapper contains the State, along with a closure
@@ -21,8 +21,8 @@ struct State{
 struct StateWrapper<V>
     where V: Fn() -> Value
 { 
-    State: State,
-    GetValue: V,
+    state: State,
+    get_value: V,
 }
 
 // RoundStep is the step of the consensus in the round.
@@ -64,10 +64,10 @@ enum Message {
 }
 
 struct Proposal{
-    Height: i64,
-    Round: i64,
-    Value: Value,
-    POLRound: i64,
+    height: i64,
+    round: i64,
+    value: Value,
+    pol_round: i64,
 }
 struct Vote{}
 struct Timeout{}
@@ -77,29 +77,29 @@ impl<V> StateWrapper<V>
 {
     fn new(height: i64, get_value: V) -> StateWrapper<V>{
         StateWrapper{
-            State: State{
-                Height: height,
-                Round: 0,
-                Step: RoundStep::NewRound,
-                LockedValue: None,
-                LockedRound: -1,
-                ValidValue: None,
-                ValidRound: -1,
+            state: State{
+                height: height,
+                round: 0,
+                step: RoundStep::NewRound,
+                locked_value: None,
+                locked_round: -1,
+                valid_value: None,
+                valid_round: -1,
             },
-            GetValue: get_value,
+            get_value: get_value,
         }
     }
 
     fn with_state(self, state: State) -> StateWrapper<V>{
         StateWrapper{
-            State: state,
-            GetValue: self.GetValue,
+            state: state,
+            get_value: self.get_value,
         }
     }
 
     fn next(self, event: Event) -> (StateWrapper<V>, Option<Message>) {
-        let s = self.State;
-        let (s, m) = match (s.Step, event) {
+        let s = self.state;
+        let (s, m) = match (s.step, event) {
             (RoundStep::NewRound, Event::NewRoundProposer(h, r)) => {   handle_new_round_proposer(&self, h, r) } // 11/14
             (RoundStep::NewRound, Event::NewRound(h, r)) => {   handle_new_round(s, h, r) } // 11/20
             (RoundStep::Propose, Event::Proposal(h, r, v)) => {   handle_proposal(s, h, r, v) } // 22
@@ -126,20 +126,20 @@ fn handle_new_round_proposer<V>(sw: &StateWrapper<V>, h: i64, r: i64) -> (State,
 {
     // update to step propose
     let s = State{
-        Round: r,
-        Step: RoundStep::Propose,
-        ..sw.State
+        round: r,
+        step: RoundStep::Propose,
+        ..sw.state
     };
     // decide proposal
-    let proposal_value = match s.ValidValue {
+    let proposal_value = match s.valid_value{
         Some(v) => { v }
-        None    => { (sw.GetValue)() }
+        None    => { (sw.get_value)() }
     };
     let proposal = Proposal{
-        Height: h,
-        Round: r,
-        Value: proposal_value,
-        POLRound: s.ValidRound,
+        height: h,
+        round: r,
+        value: proposal_value,
+        pol_round: s.valid_round,
     };
     (s, Some(Message::Proposal(proposal)))
 }
