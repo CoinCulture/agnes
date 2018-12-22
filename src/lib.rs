@@ -3,6 +3,12 @@
 #[derive(Copy, Clone)]
 struct Value{}
 
+// ValueManager gets and validates values.
+trait ValueManager{
+    fn get_value(&self) -> Value;
+    fn validate(&self, v: Value) -> bool;
+}
+
 // State is the state of the consensus.
 #[derive(Copy, Clone)]
 struct State{
@@ -15,14 +21,14 @@ struct State{
     valid_round: i64,
 }
 
-// StateWrapper contains the State, along with a closure
-// for proposing a new value.
+// StateWrapper contains the State. It also contains a ValueManager 
+// for proposing a new value and validating received values.
 #[derive(Copy, Clone)]
 struct StateWrapper<V>
-    where V: Fn() -> Value
+    where V: ValueManager
 { 
     state: State,
-    get_value: V,
+    value_manager: V,
 }
 
 // RoundStep is the step of the consensus in the round.
@@ -70,12 +76,16 @@ struct Proposal{
     pol_round: i64,
 }
 struct Vote{}
-struct Timeout{}
+struct Timeout{
+    height: i64,
+    round: i64,
+    step: RoundStep,
+}
 
 impl<V> StateWrapper<V>
-    where V: Fn() -> Value
+    where V: ValueManager
 {
-    fn new(height: i64, get_value: V) -> StateWrapper<V>{
+    fn new(height: i64, value_manager: V) -> StateWrapper<V>{
         StateWrapper{
             state: State{
                 height: height,
@@ -86,14 +96,14 @@ impl<V> StateWrapper<V>
                 valid_value: None,
                 valid_round: -1,
             },
-            get_value: get_value,
+            value_manager: value_manager,
         }
     }
 
     fn with_state(self, state: State) -> StateWrapper<V>{
         StateWrapper{
             state: state,
-            get_value: self.get_value,
+            ..self
         }
     }
 
@@ -121,8 +131,9 @@ impl<V> StateWrapper<V>
 }
 
 // we're the proposer. decide a propsal.
+// 11/14
 fn handle_new_round_proposer<V>(sw: &StateWrapper<V>, h: i64, r: i64) -> (State, Option<Message>) 
-    where V: Fn() -> Value
+    where V: ValueManager
 {
     // update to step propose
     let s = State{
@@ -133,7 +144,7 @@ fn handle_new_round_proposer<V>(sw: &StateWrapper<V>, h: i64, r: i64) -> (State,
     // decide proposal
     let proposal_value = match s.valid_value{
         Some(v) => { v }
-        None    => { (sw.get_value)() }
+        None    => { sw.value_manager.get_value() }
     };
     let proposal = Proposal{
         height: h,
