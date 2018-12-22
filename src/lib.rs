@@ -61,21 +61,27 @@ enum RoundStep {
 }
 
 // Event causes a state transition.
-enum Event {
-    NewRound(i64),
-    NewRoundProposer(i64, Value),
-    Proposal(i64, Value),
-    ProposalInvalid(i64),
-    ProposalPolka(i64, i64, Value),
-    PolkaAny(i64),
-    PolkaNil(i64),
-    PolkaValue(i64, Value),
-    PrecommitAny(i64),
-    PrecommitValue(i64, Value),
-    RoundSkip(i64),
-    TimeoutPropose(i64),
-    TimeoutPrevote(i64),
-    TimeoutPrecommit(i64),
+struct Event{
+    round: i64,
+    typ: EventType
+}
+
+// EventType is a type of event, with any additional data
+enum EventType {
+    NewRound,
+    NewRoundProposer(Value),
+    Proposal(Value),
+    ProposalInvalid,
+    ProposalPolka(i64, Value),
+    PolkaAny,
+    PolkaNil,
+    PolkaValue(Value),
+    PrecommitAny,
+    PrecommitValue(Value),
+    RoundSkip,
+    TimeoutPropose,
+    TimeoutPrevote,
+    TimeoutPrecommit,
 }
 
 // Message is returned.
@@ -145,24 +151,30 @@ impl State{
     }
 
     fn next(self, event: Event) -> (State, Option<Message>) {
-        let (s, round) = (self, self.round);
-        let (s, m) = match (s.step, event) {
-            (RoundStep::NewRound, Event::NewRoundProposer(r, v)) => { handle_new_round_proposer(s, r, v) } // 11/14
-            (RoundStep::NewRound, Event::NewRound(r)) => { handle_new_round(s, r) } // 11/20
-            (RoundStep::Propose, Event::Proposal(r, v)) if round == r => { handle_proposal(s, v) } // 22
-            (RoundStep::Propose, Event::ProposalInvalid(r)) if round == r => { handle_proposal_invalid(s) } // 22/25, 28/31
-            (RoundStep::Propose, Event::ProposalPolka(r, vr, v)) if round == r => { handle_proposal_polka(s, vr, v) } // 28
-            (RoundStep::Propose, Event::TimeoutPropose(r)) if round == r => { handle_timeout_propose(s) } // 57
-            (RoundStep::Prevote, Event::PolkaAny(r)) if round == r => { handle_polka_any(s) } // 34
-            (RoundStep::Prevote, Event::PolkaNil(r)) if round == r => { handle_polka_nil(s) } // 44
-            (RoundStep::Prevote, Event::PolkaValue(r, v)) if round == r => { handle_polka_value_prevote(s, v) } // 36/37 - only once?
-            (RoundStep::Prevote, Event::TimeoutPrevote(r)) if round == r => { handle_timeout_prevote(s) } // 61
-            (RoundStep::Precommit, Event::PolkaValue(r, v)) if round == r => { handle_polka_value_precommit(s, v) } // 36/42 - only once?
-            (_,                    Event::PrecommitAny(r)) if round == r => { handle_precommit_any(s) } // 47
-            (_,                    Event::PrecommitValue(r, v)) => { handle_precommit_value(s, r, v) } // 49
-            (_,                    Event::RoundSkip(r)) if round < r => { handle_round_skip(s, r) } // 55
-            (_,                    Event::TimeoutPrecommit(r)) if round == r => { handle_round_skip(s, r+1) } // 65
-            _ => { (s, None) }
+        let (s, round, eround) = (self, self.round, event.round);
+        let (s, m) = if eround == round{
+            match (s.step, event.typ) {
+                (RoundStep::Propose, EventType::Proposal(v)) => { handle_proposal(s, v) } // 22
+                (RoundStep::Propose, EventType::ProposalInvalid) => { handle_proposal_invalid(s) } // 22/25, 28/31
+                (RoundStep::Propose, EventType::ProposalPolka(vr, v)) => { handle_proposal_polka(s, vr, v) } // 28
+                (RoundStep::Propose, EventType::TimeoutPropose) => { handle_timeout_propose(s) } // 57
+                (RoundStep::Prevote, EventType::PolkaAny) => { handle_polka_any(s) } // 34
+                (RoundStep::Prevote, EventType::PolkaNil) => { handle_polka_nil(s) } // 44
+                (RoundStep::Prevote, EventType::PolkaValue(v)) => { handle_polka_value_prevote(s, v) } // 36/37 - only once?
+                (RoundStep::Prevote, EventType::TimeoutPrevote) => { handle_timeout_prevote(s) } // 61
+                (RoundStep::Precommit, EventType::PolkaValue(v)) => { handle_polka_value_precommit(s, v) } // 36/42 - only once?
+                (_,                    EventType::PrecommitAny) => { handle_precommit_any(s) } // 47
+                (_,                    EventType::TimeoutPrecommit) => { handle_round_skip(s, eround+1) } // 65
+                _ => { (s, None) }
+            }
+        } else {
+            match (s.step, event.typ) {
+                (RoundStep::NewRound, EventType::NewRoundProposer(v)) => { handle_new_round_proposer(s, eround, v) } // 11/14
+                (RoundStep::NewRound, EventType::NewRound) => { handle_new_round(s, eround) } // 11/20
+                (_,                    EventType::PrecommitValue(v)) => { handle_precommit_value(s, eround, v) } // 49
+                (_,                    EventType::RoundSkip) if round < eround => { handle_round_skip(s, eround) } // 55
+                _ => { (s, None) }
+            }
         };
         (s, m)
     }
