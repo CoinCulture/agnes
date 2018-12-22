@@ -1,0 +1,4 @@
+[[package]]
+name = "tendermint-rs"
+version = "0.1.0"
+
