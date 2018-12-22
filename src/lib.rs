@@ -167,10 +167,10 @@ impl<V> StateWrapper<V>
     fn next(self, event: Event) -> (StateWrapper<V>, Option<Message>) {
         let s = self.state;
         let (s, m) = match (s.step, event) {
-            (RoundStep::NewRound, Event::NewRoundProposer(h, r)) => {   handle_new_round_proposer(&self, h, r) } // 11/14
-            (RoundStep::NewRound, Event::NewRound(h, r)) => {   handle_new_round(s, h, r) } // 11/20
-            (RoundStep::Propose, Event::Proposal(h, r, v)) => {   handle_proposal(&self, h, r, v) } // 22
-            (RoundStep::Propose, Event::ProposalPolka(h, r, vr, v)) => {  handle_proposal_polka(&self, h, r, vr, v) } // 28
+            (RoundStep::NewRound, Event::NewRoundProposer(h, r)) => {   self.handle_new_round_proposer(h, r) } // 11/14
+            (RoundStep::NewRound, Event::NewRound(h, r)) => {   self.handle_new_round(h, r) } // 11/20
+            (RoundStep::Propose, Event::Proposal(h, r, v)) => {   self.handle_proposal(h, r, v) } // 22
+            (RoundStep::Propose, Event::ProposalPolka(h, r, vr, v)) => {  self.handle_proposal_polka(h, r, vr, v) } // 28
             (RoundStep::Propose, Event::TimeoutPropose(h, r)) => {  handle_timeout_propose(s, h, r) } // 57
             (RoundStep::Prevote, Event::PolkaAny(h, r)) => {  handle_polka_any(s, h, r) } // 34
             (RoundStep::Prevote, Event::PolkaNil(h, r)) => {  handle_polka_nil(s, h, r) } // 44
@@ -185,96 +185,107 @@ impl<V> StateWrapper<V>
         };
         (self.with_state(s), m)
     }
+
+    // we're the proposer. decide a propsal.
+    // 11/14
+    fn handle_new_round_proposer(&self, h: i64, r: i64) -> (State, Option<Message>) {
+        let s = self.state.update_round(r).update_step(RoundStep::Propose);
+        let proposal_value = match s.valid_value{
+            Some(v) => { v }
+            None    => { self.value_manager.get_value() }
+        };
+        (s, Some(Message::Proposal(Proposal::new(h, r, proposal_value, s.valid_round))))
+    }
+
+
+    // we're not the proposer. schedule timeout propose
+    // 11/20
+    fn handle_new_round(&self, h: i64, r: i64) -> (State, Option<Message>) {
+        let s = self.state.update_round(r).update_step(RoundStep::Propose);
+        (s, Some(Message::Timeout(Timeout::new(s.height, s.round, s.step))))
+    }
+
+    // received a complete proposal with new value - prevote
+    // 22
+    fn handle_proposal(&self, h: i64, r: i64, proposed_value: Value) -> (State, Option<Message>){
+        let s = self.state.update_step(RoundStep::Prevote);
+        let prevote_value = match self.value_manager.validate(proposed_value) {
+            false => { None } // its not valid, prevote nil
+            true => match s.locked_value {
+                Some(v) if proposed_value != v => { None } // locked but the vals dont match, prevote nil
+                _ => { Some(proposed_value) } // otherwise, prevote the value
+            }
+        };
+        (s, Some(Message::Prevote(Vote::new(s.height, s.round, prevote_value))))
+    }
+
+    // received a complete proposal with old (polka) value - prevote
+    // 28
+    fn handle_proposal_polka(&self, h: i64, r: i64, vr: i64, proposed_value: Value) -> (State, Option<Message>) {
+        let s = self.state.update_step(RoundStep::Prevote);
+        let prevote_value = match self.value_manager.validate(proposed_value) {
+            false => { None } // its not valid, prevote nil
+            true => match s.locked_value {
+                Some(v) if s.locked_round <= vr => { Some(proposed_value) } // unlock and prevote
+                Some(v) if v == proposed_value  => { Some(proposed_value) } // already locked on value
+                _ => { None } // otherwise, prevote nil
+            }
+        };
+        (s, Some(Message::Prevote(Vote::new(s.height, s.round, prevote_value))))
+    }
 }
 
-// we're the proposer. decide a propsal.
-// 11/14
-fn handle_new_round_proposer<V>(sw: &StateWrapper<V>, h: i64, r: i64) -> (State, Option<Message>) 
-    where V: ValueManager
-{
-    let s = sw.state.update_round(r).update_step(RoundStep::Propose);
-    let proposal_value = match s.valid_value{
-        Some(v) => { v }
-        None    => { sw.value_manager.get_value() }
-    };
-    (s, Some(Message::Proposal(Proposal::new(h, r, proposal_value, s.valid_round))))
-}
-
-// we're not the proposer. schedule timeout propose
-// 11/20
-fn handle_new_round(s: State, h: i64, r: i64) -> (State, Option<Message>) {
-    let s = s.update_round(r).update_step(RoundStep::Propose);
-    (s, Some(Message::Timeout(Timeout::new(s.height, s.round, s.step))))
-}
-
-// received a complete proposal with new value - prevote
-// 22
-fn handle_proposal<V>(sw: &StateWrapper<V>, h: i64, r: i64, proposed_value: Value) -> (State, Option<Message>)
-    where V: ValueManager
-{
-    let s = sw.state.update_step(RoundStep::Prevote);
-    let prevote_value = match sw.value_manager.validate(proposed_value) {
-        false => { None } // its not valid, prevote nil
-        true => match s.locked_value {
-            Some(v) if proposed_value != v => { None } // locked but the vals dont match, prevote nil
-            _ => { Some(proposed_value) } // otherwise, prevote the value
-        }
-    };
-    (s, Some(Message::Prevote(Vote::new(s.height, s.round, prevote_value))))
-}
-
-// received a complete proposal with old (polka) value - prevote
-// 28
-fn handle_proposal_polka<V>(sw: &StateWrapper<V>, h: i64, r: i64, vr: i64, proposed_value: Value) -> (State, Option<Message>) 
-    where V: ValueManager
-{
-    let s = sw.state.update_step(RoundStep::Prevote);
-    let prevote_value = match sw.value_manager.validate(proposed_value) {
-        false => { None } // its not valid, prevote nil
-        true => match s.locked_value {
-            Some(v) if s.locked_round <= vr => { Some(proposed_value) } // unlock and prevote
-            Some(v) if v == proposed_value  => { Some(proposed_value) } // already locked on value
-            _ => { None } // otherwise, prevote nil
-        }
-    };
-    (s, Some(Message::Prevote(Vote::new(s.height, s.round, prevote_value))))
-}
-
+// timed out of propose - prevote nil
+// 57
 fn handle_timeout_propose(s: State, h: i64, r: i64) -> (State, Option<Message>) {
+    if s.height == h && s.round == r {
+        let s = s.update_step(RoundStep::Prevote);
+        return (s, Some(Message::Prevote(Vote::new(h, r, None))))
+    }
     (s, None)
 }
 
+// 34
+// TODO: this should only execute once per round
 fn handle_polka_any(s: State, h: i64, r: i64) -> (State, Option<Message>) {
-    (s, None)
+    (s, Some(Message::Timeout(Timeout::new(h, r, RoundStep::Prevote))))
 }
 
+// 44
 fn handle_polka_nil(s: State, h: i64, r: i64) -> (State, Option<Message>) {
     (s, None)
 }
 
+// 36
 fn handle_polka_value(s: State, h: i64, r: i64, v: Value) -> (State, Option<Message>) {
     (s, None)
 }
 
+// 61
 fn handle_timeout_prevote(s: State, h: i64, r: i64) -> (State, Option<Message>) {
     (s, None)
 }
 
+// 47
 fn handle_commit_any(s: State, h: i64, r: i64) -> (State, Option<Message>) {
     (s, None)
 }
 
+// 49
 fn handle_commit_value(s: State, h: i64, r: i64, v: Value) -> (State, Option<Message>) {
     (s, None)
 }
 
+// 55
 fn handle_cert_value(s: State, h: i64, r: i64, v: Value) -> (State, Option<Message>) {
     (s, None)
 }
 
+// 65
 fn handle_timeout_precommit(s: State, h: i64, r: i64) -> (State, Option<Message>) {
     (s, None)
 }
+
 
 
 
