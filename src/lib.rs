@@ -1,16 +1,16 @@
 
-// Value is the value the consensus seeks agreement on.
+// Value is what we want to agree on.
 #[derive(Copy, Clone, PartialEq)]
 struct Value{}
 
-// RoundValue contains a Value and the round it was set.
+// RoundValue contains a Value and associated Round.
 #[derive(Copy, Clone, PartialEq)]
 struct RoundValue{
     round: i64,
     value: Value
 }
 
-// State is the state of the consensus.
+// State is the state of the consensus state machine.
 #[derive(Copy, Clone)]
 struct State{
     height: i64,
@@ -60,7 +60,7 @@ enum RoundStep {
     Commit,
 }
 
-// Event causes a state transition.
+// Event causes a state transition or message.
 struct Event{
     round: i64,
     typ: EventType
@@ -68,23 +68,24 @@ struct Event{
 
 // EventType is a type of event, with any additional data
 enum EventType {
-    NewRound,
-    NewRoundProposer(Value),
-    Proposal(Value),
-    ProposalInvalid,
-    ProposalPolka(i64, Value),
-    PolkaAny,
-    PolkaNil,
-    PolkaValue(Value),
-    PrecommitAny,
-    PrecommitValue(Value),
-    RoundSkip,
-    TimeoutPropose,
-    TimeoutPrevote,
-    TimeoutPrecommit,
+    NewRound, // Start a new round, not as proposer
+    NewRoundProposer(Value), // Start a new round and propose the Value
+    Proposal(Value), // Receive a proposal
+    ProposalInvalid, // Receive an invalid proposal
+    ProposalPolka(i64, Value), // Receive a proposal with a polka
+    PolkaAny, // Receive +2/3 prevotes for anything
+    PolkaNil, // Receive +2/3 prevotes for nil
+    PolkaValue(Value), // Receive +2/3 prevotes for Value
+    PrecommitAny, // Receive +2/3 precommits for anything
+    PrecommitValue(Value), // Receive +2/3 precommits for Value
+    RoundSkip, // Skip to a higher round
+    TimeoutPropose, // Timeout waiting for proposal
+    TimeoutPrevote, // Timeout waiting for prevotes
+    TimeoutPrecommit, // Timeout waiting for precommits
 }
 
-// Message is returned.
+// Message is the output of the state machine - proposals/votes
+// to send to peers, timeouts to schedule, and an ultimate decision value.
 enum Message {
     NewRound(i64),
     Proposal(Proposal),
@@ -94,6 +95,8 @@ enum Message {
     Decision(RoundValue),
 }
 
+// Proposal proposes a value in a round.
+// pol_round is -1 or the last round this value got a polka.
 struct Proposal{
     round: i64,
     value: Value,
@@ -110,6 +113,7 @@ impl Proposal{
     }
 }
 
+// Vote is a vote for a value in a round.
 struct Vote{
     round: i64,
     value: Option<Value>,
@@ -124,6 +128,7 @@ impl Vote {
     }
 }
 
+// Timeout is used to schedule timeouts at different steps in the round.
 struct Timeout{
     round: i64,
     step: RoundStep,
@@ -140,6 +145,7 @@ impl Timeout{
 }
 
 impl State{
+    // new creates a new State at the given height.
     fn new(height: i64) -> State{
         State{
             height: height,
@@ -150,6 +156,8 @@ impl State{
         }
     }
 
+    // next progresses the state machine. It returns an updated State
+    // and an optional message.
     fn next(self, event: Event) -> (State, Option<Message>) {
         let (s, round, eround) = (self, self.round, event.round);
         let (s, m) = if eround == round{
