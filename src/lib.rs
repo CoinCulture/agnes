@@ -1,18 +1,24 @@
 
 // Value is what we want to agree on.
-#[derive(Copy, Clone, PartialEq)]
-struct Value{}
+#[derive(Copy, Clone, PartialEq, Debug)]
+pub struct Value{}
 
 // RoundValue contains a Value and associated Round.
-#[derive(Copy, Clone, PartialEq)]
-struct RoundValue{
+#[derive(Copy, Clone, PartialEq, Debug)]
+pub struct RoundValue{
     round: i64,
     value: Value
 }
 
+impl RoundValue {
+    pub fn new(round: i64, value: Value) -> RoundValue {
+        RoundValue{ round, value }
+    }
+}
+
 // State is the state of the consensus state machine.
-#[derive(Copy, Clone)]
-struct State{
+#[derive(Copy, Clone, Debug)]
+pub struct State{
     height: i64,
     round: i64,
     step: RoundStep,
@@ -51,8 +57,8 @@ impl State{
 }
 
 // RoundStep is the step of the consensus in the round.
-#[derive(Copy, Clone)]
-enum RoundStep {
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum RoundStep {
     NewRound,
     Propose,
     Prevote,
@@ -61,13 +67,13 @@ enum RoundStep {
 }
 
 // Event causes a state transition or message.
-struct Event{
+pub struct Event{
     round: i64,
     typ: EventType
 }
 
 // EventType is a type of event, with any additional data
-enum EventType {
+pub enum EventType {
     NewRound, // Start a new round, not as proposer
     NewRoundProposer(Value), // Start a new round and propose the Value
     Proposal(Value), // Receive a proposal
@@ -86,7 +92,8 @@ enum EventType {
 
 // Message is the output of the state machine - proposals/votes
 // to send to peers, timeouts to schedule, and an ultimate decision value.
-enum Message {
+#[derive(Debug, PartialEq)]
+pub enum Message {
     NewRound(i64),
     Proposal(Proposal),
     Prevote(Vote),
@@ -97,7 +104,8 @@ enum Message {
 
 // Proposal proposes a value in a round.
 // pol_round is -1 or the last round this value got a polka.
-struct Proposal{
+#[derive(Debug, PartialEq)]
+pub struct Proposal{
     round: i64,
     value: Value,
     pol_round: i64,
@@ -114,7 +122,8 @@ impl Proposal{
 }
 
 // Vote is a vote for a value in a round.
-struct Vote{
+#[derive(Debug, PartialEq)]
+pub struct Vote{
     round: i64,
     value: Option<Value>,
 }
@@ -129,7 +138,8 @@ impl Vote {
 }
 
 // Timeout is used to schedule timeouts at different steps in the round.
-struct Timeout{
+#[derive(Debug, PartialEq)]
+pub struct Timeout{
     round: i64,
     step: RoundStep,
 }
@@ -146,7 +156,7 @@ impl Timeout{
 
 impl State{
     // new creates a new State at the given height.
-    fn new(height: i64) -> State{
+    pub fn new(height: i64) -> State{
         State{
             height: height,
             round: 0,
@@ -158,33 +168,33 @@ impl State{
 
     // next progresses the state machine. It returns an updated State
     // and an optional message.
-    fn next(self, event: Event) -> (State, Option<Message>) {
+    pub fn next(self, event: Event) -> (State, Option<Message>) {
         let (s, round, eround) = (self, self.round, event.round);
-        let (s, m) = if eround == round{
-            match (s.step, event.typ) {
-                (RoundStep::Propose, EventType::Proposal(v)) => { prevote(s, v) } // 22
-                (RoundStep::Propose, EventType::ProposalInvalid) => { prevote_nil(s) } // 22/25, 28/31
-                (RoundStep::Propose, EventType::ProposalPolka(vr, v)) => { prevote_polka(s, vr, v) } // 28
-                (RoundStep::Propose, EventType::TimeoutPropose) => { prevote_nil(s) } // 57
-                (RoundStep::Prevote, EventType::PolkaAny) => { schedule_timeout_prevote(s) } // 34
-                (RoundStep::Prevote, EventType::PolkaNil) => { precommit_nil(s) } // 44
-                (RoundStep::Prevote, EventType::PolkaValue(v)) => { precommit(s, v) } // 36/37 - NOTE: only once?
-                (RoundStep::Prevote, EventType::TimeoutPrevote) => { precommit_nil(s) } // 61
-                (RoundStep::Precommit, EventType::PolkaValue(v)) => { set_valid_value(s, v) } // 36/42 - NOTE: only once?
-                (_,                    EventType::PrecommitAny) => { schedule_timeout_precommit(s) } // 47
-                (_,                    EventType::TimeoutPrecommit) => { round_skip(s, eround+1) } // 65
-                _ => { (s, None) }
-            }
-        } else {
-            match (s.step, event.typ) {
-                (RoundStep::NewRound, EventType::NewRoundProposer(v)) => { propose(s, eround, v) } // 11/14
-                (RoundStep::NewRound, EventType::NewRound) => { schedule_timeout_propose(s, eround) } // 11/20
-                (_,                    EventType::PrecommitValue(v)) => { commit(s, eround, v) } // 49
-                (_,                    EventType::RoundSkip) if round < eround => { round_skip(s, eround) } // 55
-                _ => { (s, None) }
-            }
-        };
-        (s, m)
+        match (s.step, event.typ) {
+            // no round guards
+            (RoundStep::NewRound, EventType::NewRoundProposer(v)) => { propose(s, eround, v) } // 11/14
+            (RoundStep::NewRound, EventType::NewRound) => { schedule_timeout_propose(s, eround) } // 11/20
+
+            // must equal current round
+            (RoundStep::Propose, EventType::Proposal(v)) if round == eround => { prevote(s, v) } // 22
+            (RoundStep::Propose, EventType::ProposalInvalid) if round == eround => { prevote_nil(s) } // 22/25, 28/31
+            (RoundStep::Propose, EventType::ProposalPolka(vr, v)) if round == eround => { prevote_polka(s, vr, v) } // 28
+            (RoundStep::Propose, EventType::TimeoutPropose) if round == eround => { prevote_nil(s) } // 57
+            (RoundStep::Prevote, EventType::PolkaAny) if round == eround => { schedule_timeout_prevote(s) } // 34
+            (RoundStep::Prevote, EventType::PolkaNil) if round == eround => { precommit_nil(s) } // 44
+            (RoundStep::Prevote, EventType::PolkaValue(v)) if round == eround => { precommit(s, v) } // 36/37 - NOTE: only once?
+            (RoundStep::Prevote, EventType::TimeoutPrevote) if round == eround => { precommit_nil(s) } // 61
+            (RoundStep::Precommit, EventType::PolkaValue(v)) if round == eround => { set_valid_value(s, v) } // 36/42 - NOTE: only once?
+            (_,                    EventType::PrecommitAny) if round == eround => { schedule_timeout_precommit(s) } // 47
+            (_,                    EventType::TimeoutPrecommit) if round == eround => { round_skip(s, eround+1) } // 65
+
+            // must be from higher round
+            (_,                    EventType::RoundSkip) if round < eround => { round_skip(s, eround) } // 55
+
+            // no round guards
+            (_,                    EventType::PrecommitValue(v)) => { commit(s, eround, v) } // 49
+            _ => { (s, None) }
+        }
     }
 }
 
@@ -296,14 +306,31 @@ fn round_skip(s: State, r: i64) -> (State, Option<Message>) {
 // 49
 fn commit(s: State, r: i64, v: Value) -> (State, Option<Message>) {
     let s = s.set_step(RoundStep::Commit);
-    (s, Some(Message::Decision(RoundValue{round: r, value: v})))
+    (s, Some(Message::Decision(RoundValue::new(r, v))))
 }
 
+//---------------------------------------------------------------------
+// test
 
+#[cfg(test)]
+mod tests {
+    use super::*;
 
+    #[test]
+    fn happy_case() {
 
+        let val = Value{};
+		let v = Some(val);
+		let s = State::new(1);
+		let (s, m) = s.next(Event{round:0, typ:EventType::NewRoundProposer(val)});
+        assert_eq!(m.unwrap(), Message::Proposal(Proposal::new(0, val, -1)));
+		let (s, m) = s.next(Event{round:0, typ:EventType::Proposal(val)});
+        assert_eq!(m.unwrap(), Message::Prevote(Vote::new(0, v)));
+		let (s, m) = s.next(Event{round:0, typ:EventType::PolkaValue(val)});
+        assert_eq!(m.unwrap(), Message::Precommit(Vote::new(0, v)));
+	    let (s, m) = s.next(Event{round:0, typ:EventType::PrecommitValue(val)});
+        assert_eq!(m.unwrap(), Message::Decision(RoundValue::new(0, val)));
 
-
-fn main() {
-    println!("Hello, world!");
+        assert_eq!(s.step, RoundStep::Commit);
+    }
 }
