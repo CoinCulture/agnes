@@ -154,25 +154,25 @@ impl State{
         let (s, round, eround) = (self, self.round, event.round);
         let (s, m) = if eround == round{
             match (s.step, event.typ) {
-                (RoundStep::Propose, EventType::Proposal(v)) => { handle_proposal(s, v) } // 22
-                (RoundStep::Propose, EventType::ProposalInvalid) => { handle_proposal_invalid(s) } // 22/25, 28/31
-                (RoundStep::Propose, EventType::ProposalPolka(vr, v)) => { handle_proposal_polka(s, vr, v) } // 28
-                (RoundStep::Propose, EventType::TimeoutPropose) => { handle_timeout_propose(s) } // 57
-                (RoundStep::Prevote, EventType::PolkaAny) => { handle_polka_any(s) } // 34
-                (RoundStep::Prevote, EventType::PolkaNil) => { handle_polka_nil(s) } // 44
-                (RoundStep::Prevote, EventType::PolkaValue(v)) => { handle_polka_value_prevote(s, v) } // 36/37 - only once?
-                (RoundStep::Prevote, EventType::TimeoutPrevote) => { handle_timeout_prevote(s) } // 61
-                (RoundStep::Precommit, EventType::PolkaValue(v)) => { handle_polka_value_precommit(s, v) } // 36/42 - only once?
-                (_,                    EventType::PrecommitAny) => { handle_precommit_any(s) } // 47
-                (_,                    EventType::TimeoutPrecommit) => { handle_round_skip(s, eround+1) } // 65
+                (RoundStep::Propose, EventType::Proposal(v)) => { prevote(s, v) } // 22
+                (RoundStep::Propose, EventType::ProposalInvalid) => { prevote_nil(s) } // 22/25, 28/31
+                (RoundStep::Propose, EventType::ProposalPolka(vr, v)) => { prevote_polka(s, vr, v) } // 28
+                (RoundStep::Propose, EventType::TimeoutPropose) => { prevote_nil(s) } // 57
+                (RoundStep::Prevote, EventType::PolkaAny) => { schedule_timeout_prevote(s) } // 34
+                (RoundStep::Prevote, EventType::PolkaNil) => { precommit_nil(s) } // 44
+                (RoundStep::Prevote, EventType::PolkaValue(v)) => { precommit(s, v) } // 36/37 - NOTE: only once?
+                (RoundStep::Prevote, EventType::TimeoutPrevote) => { precommit_nil(s) } // 61
+                (RoundStep::Precommit, EventType::PolkaValue(v)) => { set_valid_value(s, v) } // 36/42 - NOTE: only once?
+                (_,                    EventType::PrecommitAny) => { schedule_timeout_precommit(s) } // 47
+                (_,                    EventType::TimeoutPrecommit) => { round_skip(s, eround+1) } // 65
                 _ => { (s, None) }
             }
         } else {
             match (s.step, event.typ) {
-                (RoundStep::NewRound, EventType::NewRoundProposer(v)) => { handle_new_round_proposer(s, eround, v) } // 11/14
-                (RoundStep::NewRound, EventType::NewRound) => { handle_new_round(s, eround) } // 11/20
-                (_,                    EventType::PrecommitValue(v)) => { handle_precommit_value(s, eround, v) } // 49
-                (_,                    EventType::RoundSkip) if round < eround => { handle_round_skip(s, eround) } // 55
+                (RoundStep::NewRound, EventType::NewRoundProposer(v)) => { propose(s, eround, v) } // 11/14
+                (RoundStep::NewRound, EventType::NewRound) => { schedule_timeout_propose(s, eround) } // 11/20
+                (_,                    EventType::PrecommitValue(v)) => { commit(s, eround, v) } // 49
+                (_,                    EventType::RoundSkip) if round < eround => { round_skip(s, eround) } // 55
                 _ => { (s, None) }
             }
         };
@@ -180,9 +180,12 @@ impl State{
     }
 }
 
+//---------------------------------------------------------------------
+// propose
+
 // we're the proposer. decide a propsal.
 // 11/14
-fn handle_new_round_proposer(s: State, r: i64, v: Value) -> (State, Option<Message>) {
+fn propose(s: State, r: i64, v: Value) -> (State, Option<Message>) {
     let s = s.set_round(r).set_step(RoundStep::Propose);
     let (value, round) = match s.valid {
         Some(v) => { (v.value, v.round) }
@@ -192,16 +195,12 @@ fn handle_new_round_proposer(s: State, r: i64, v: Value) -> (State, Option<Messa
 }
 
 
-// we're not the proposer. schedule timeout propose
-// 11/20
-fn handle_new_round(s: State, r: i64) -> (State, Option<Message>) {
-    let s = s.set_round(r).set_step(RoundStep::Propose);
-    (s, Some(Message::Timeout(Timeout::new(s.round, s.step))))
-}
+//---------------------------------------------------------------------
+// prevote
 
 // received a complete proposal with new value - prevote
 // 22
-fn handle_proposal(s: State, proposed: Value) -> (State, Option<Message>){
+fn prevote(s: State, proposed: Value) -> (State, Option<Message>){
     let s = s.set_step(RoundStep::Prevote);
     let value = match s.locked {
         Some(locked) if proposed != locked.value => { None } // locked on something else
@@ -210,16 +209,16 @@ fn handle_proposal(s: State, proposed: Value) -> (State, Option<Message>){
     (s, Some(Message::Prevote(Vote::new(s.round, value))))
 }
 
-// received a complete proposal for an empty or invalid value - prevote nil
-// 22
-fn handle_proposal_invalid(s: State) -> (State, Option<Message>){
+// received a complete proposal for an empty or invalid value, or timed out.
+// 22, 57
+fn prevote_nil(s: State) -> (State, Option<Message>){
     let s = s.set_step(RoundStep::Prevote);
     (s, Some(Message::Prevote(Vote::new(s.round, None))))
 }
 
 // received a complete proposal with old (polka) value - prevote
 // 28
-fn handle_proposal_polka(s: State, vr: i64, proposed: Value) -> (State, Option<Message>) {
+fn prevote_polka(s: State, vr: i64, proposed: Value) -> (State, Option<Message>) {
     let s = s.set_step(RoundStep::Prevote);
     let value = match s.locked {
         Some(locked) if locked.round <= vr => { Some(proposed) } // unlock and prevote
@@ -229,65 +228,70 @@ fn handle_proposal_polka(s: State, vr: i64, proposed: Value) -> (State, Option<M
     (s, Some(Message::Prevote(Vote::new(s.round, value))))
 }
 
-// timed out of propose - prevote nil
-// 57
-fn handle_timeout_propose(s: State) -> (State, Option<Message>) {
-    let s = s.set_step(RoundStep::Prevote);
-    (s, Some(Message::Prevote(Vote::new(s.round, None))))
-}
 
-// 34
-// NOTE: this should only be called once in a round, per the spec,
-// but it's harmless to schedule more timeouts
-fn handle_polka_any(s: State) -> (State, Option<Message>) {
-    (s, Some(Message::Timeout(Timeout::new(s.round, RoundStep::Prevote))))
-}
+//---------------------------------------------------------------------
+// precommit
 
-// 44
-fn handle_polka_nil(s: State) -> (State, Option<Message>) {
+// 44, 61
+fn precommit_nil(s: State) -> (State, Option<Message>) {
     let s = s.set_step(RoundStep::Precommit);
     (s, Some(Message::Precommit(Vote::new(s.round, None))))
 }
 
 // 36
-// NOTE: only one of these two funcs should ever be called, and only once, in a round
-fn handle_polka_value_prevote(s: State, v: Value) -> (State, Option<Message>) {
+// NOTE: only one of this and set_valid_value should be called once in a round
+fn precommit(s: State, v: Value) -> (State, Option<Message>) {
     let s = s.set_locked(v).set_valid(v).set_step(RoundStep::Precommit);
     (s, Some(Message::Precommit(Vote::new(s.round, Some(v)))))
 }
 
+//---------------------------------------------------------------------
+// schedule timeouts
+
+// we're not the proposer. schedule timeout propose
+// 11/20
+fn schedule_timeout_propose(s: State, r: i64) -> (State, Option<Message>) {
+    let s = s.set_round(r).set_step(RoundStep::Propose);
+    (s, Some(Message::Timeout(Timeout::new(s.round, s.step))))
+}
+
+// 34
+// NOTE: this should only be called once in a round, per the spec,
+// but it's harmless to schedule more timeouts
+fn schedule_timeout_prevote(s: State) -> (State, Option<Message>) {
+    (s, Some(Message::Timeout(Timeout::new(s.round, RoundStep::Prevote))))
+}
+
+// 47
+fn schedule_timeout_precommit(s: State) -> (State, Option<Message>) {
+    (s, Some(Message::Timeout(Timeout::new(s.round, RoundStep::Precommit))))
+}
+
+//---------------------------------------------------------------------
+// set the valid block
+
 // 36/42
-fn handle_polka_value_precommit(s: State, v: Value) -> (State, Option<Message>) {
+// NOTE: only one of this and precommit should be called once in a round
+fn set_valid_value(s: State, v: Value) -> (State, Option<Message>) {
     let s = s.set_valid(v);
     (s, None)
 }
 
-// 61
-fn handle_timeout_prevote(s: State) -> (State, Option<Message>) {
-    let s = s.set_step(RoundStep::Precommit);
-    (s, Some(Message::Precommit(Vote::new(s.round, None))))
-}
+//---------------------------------------------------------------------
+// new round or height
 
-// 47
-fn handle_precommit_any(s: State) -> (State, Option<Message>) {
-    (s, Some(Message::Timeout(Timeout::new(s.round, RoundStep::Precommit))))
+// 65
+fn round_skip(s: State, r: i64) -> (State, Option<Message>) {
+    (s, Some(Message::NewRound(r)))
 }
 
 // 49
-fn handle_precommit_value(s: State, r: i64, v: Value) -> (State, Option<Message>) {
+fn commit(s: State, r: i64, v: Value) -> (State, Option<Message>) {
     let s = s.set_step(RoundStep::Commit);
     (s, Some(Message::Decision(RoundValue{round: r, value: v})))
 }
 
-// 65
-fn handle_timeout_precommit(s: State, r: i64) -> (State, Option<Message>) {
-    let s = s.set_step(RoundStep::Precommit);
-    (s, Some(Message::Precommit(Vote::new(s.round, None))))
-}
 
-fn handle_round_skip(s: State, r: i64) -> (State, Option<Message>) {
-    (s, Some(Message::NewRound(r)))
-}
 
 
 
