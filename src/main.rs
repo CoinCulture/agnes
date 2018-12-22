@@ -15,14 +15,13 @@ struct State{
     ValidRound: i64,
 }
 
-// StateWrapper contains the State, along with closures
-// for getting the current proposer and proposing a new value.
-struct StateWrapper<P, V>
-    where P: Fn(i64) -> i64,
-          V: Fn() -> Value
+// StateWrapper contains the State, along with a closure
+// for proposing a new value.
+#[derive(Copy, Clone)]
+struct StateWrapper<V>
+    where V: Fn() -> Value
 { 
     State: State,
-    GetProposer: P,
     GetValue: V,
 }
 
@@ -64,15 +63,19 @@ enum Message {
     Timeout(Timeout),
 }
 
-struct Proposal{}
+struct Proposal{
+    Height: i64,
+    Round: i64,
+    Value: Value,
+    POLRound: i64,
+}
 struct Vote{}
 struct Timeout{}
 
-impl<P,V> StateWrapper<P, V>
-    where P: Fn(i64) -> i64,
-          V: Fn() -> Value
+impl<V> StateWrapper<V>
+    where V: Fn() -> Value
 {
-    fn new(height: i64, get_proposer: P, get_value: V) -> StateWrapper<P,V>{
+    fn new(height: i64, get_value: V) -> StateWrapper<V>{
         StateWrapper{
             State: State{
                 Height: height,
@@ -83,23 +86,22 @@ impl<P,V> StateWrapper<P, V>
                 ValidValue: None,
                 ValidRound: -1,
             },
-            GetProposer: get_proposer,
             GetValue: get_value,
         }
     }
 
-    fn with_state(self, state: State) -> StateWrapper<P,V>{
+    fn with_state(self, state: State) -> StateWrapper<V>{
         StateWrapper{
             State: state,
-            GetProposer: self.GetProposer,
             GetValue: self.GetValue,
         }
     }
 
-    fn next(self, event: Event) -> (StateWrapper<P,V>, Option<Message>) {
+    fn next(self, event: Event) -> (StateWrapper<V>, Option<Message>) {
         let s = self.State;
         let (s, m) = match (s.Step, event) {
-            (RoundStep::NewRound, Event::NewRound(h, r)) => {   handle_new_round(s, h, r) } // 11
+            (RoundStep::NewRound, Event::NewRoundProposer(h, r)) => {   handle_new_round_proposer(&self, h, r) } // 11/14
+            (RoundStep::NewRound, Event::NewRound(h, r)) => {   handle_new_round(s, h, r) } // 11/20
             (RoundStep::Propose, Event::Proposal(h, r, v)) => {   handle_proposal(s, h, r, v) } // 22
             (RoundStep::Propose, Event::ProposalPolka(h, r, vr, v)) => {  handle_proposal_polka(s, h, r, vr, v) } // 28
             (RoundStep::Propose, Event::TimeoutPropose(h, r)) => {  handle_timeout_propose(s, h, r) } // 57
@@ -116,6 +118,30 @@ impl<P,V> StateWrapper<P, V>
         };
         (self.with_state(s), m)
     }
+}
+
+// we're the proposer. decide a propsal.
+fn handle_new_round_proposer<V>(sw: &StateWrapper<V>, h: i64, r: i64) -> (State, Option<Message>) 
+    where V: Fn() -> Value
+{
+    // update to step propose
+    let s = State{
+        Round: r,
+        Step: RoundStep::Propose,
+        ..sw.State
+    };
+    // decide proposal
+    let proposal_value = match s.ValidValue {
+        Some(v) => { v }
+        None    => { (sw.GetValue)() }
+    };
+    let proposal = Proposal{
+        Height: h,
+        Round: r,
+        Value: proposal_value,
+        POLRound: s.ValidRound,
+    };
+    (s, Some(Message::Proposal(proposal)))
 }
 
 fn handle_new_round(s: State, h: i64, r: i64) -> (State, Option<Message>) {
