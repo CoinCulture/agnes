@@ -37,6 +37,7 @@ impl State{
 }
 
 // ValueManager gets and validates values.
+// TODO: move these into Event system instead?
 trait ValueManager{
     fn get_value(&self) -> Value;
     fn validate(&self, v: Value) -> bool;
@@ -85,8 +86,8 @@ enum Message {
     Proposal(Proposal),
     Prevote(Vote),
     Precommit(Vote),
-    Decision(Vote),
     Timeout(Timeout),
+    Decision(Vote),
 }
 
 struct Proposal{
