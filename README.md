@@ -1,7 +1,11 @@
 # Tendermint Consensus State Machine
 
 This is an implementation of the Tendermint Consensus State Machine as specified in the
-[paper](https://arxiv.org/pdf/1807.04938.pdf).
+[paper](https://arxiv.org/pdf/1807.04938.pdf). The state machine structure was inspired by
+the blog post, [Pretty State Machine Patterns in Rust](https://hoverbear.org/2016/10/12/rust-state-machine-pattern/) 
+and a [variation derived from it](https://www.reddit.com/r/rust/comments/57ccds/pretty_state_machine_patterns_in_rust/d8rhwq4/).
+It can be seen as a Rust implemention of [ADR-30 from the Tendermint Core
+project](https://github.com/tendermint/tendermint/pull/2696).
 
 There are three basic types: 
 
