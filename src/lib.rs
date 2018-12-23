@@ -72,20 +72,20 @@ pub struct RoundEvent {
 
 // Event is a type of event, with any additional data.
 pub enum Event {
-    NewRound,                  // Start a new round, not as proposer
-    NewRoundProposer(Value),   // Start a new round and propose the Value
-    Proposal(Value),           // Receive a proposal
-    ProposalInvalid,           // Receive an invalid proposal
-    ProposalPolka(i64, Value), // Receive a proposal with a polka
-    PolkaAny,                  // Receive +2/3 prevotes for anything
-    PolkaNil,                  // Receive +2/3 prevotes for nil
-    PolkaValue(Value),         // Receive +2/3 prevotes for Value
-    PrecommitAny,              // Receive +2/3 precommits for anything
-    PrecommitValue(Value),     // Receive +2/3 precommits for Value
-    RoundSkip,                 // Receive +1/3 votes from a higher round
-    TimeoutPropose,            // Timeout waiting for proposal
-    TimeoutPrevote,            // Timeout waiting for prevotes
-    TimeoutPrecommit,          // Timeout waiting for precommits
+    NewRound,                  // Start a new round, not as proposer.
+    NewRoundProposer(Value),   // Start a new round and propose the Value.
+    Proposal(Value),           // Receive a proposal.
+    ProposalInvalid,           // Receive an invalid proposal.
+    ProposalPolka(i64, Value), // Receive a proposal with a polka.
+    PolkaAny,                  // Receive +2/3 prevotes for anything.
+    PolkaNil,                  // Receive +2/3 prevotes for nil.
+    PolkaValue(Value),         // Receive +2/3 prevotes for Value.
+    PrecommitAny,              // Receive +2/3 precommits for anything.
+    PrecommitValue(Value),     // Receive +2/3 precommits for Value.
+    RoundSkip,                 // Receive +1/3 votes from a higher round.
+    TimeoutPropose,            // Timeout waiting for proposal.
+    TimeoutPrevote,            // Timeout waiting for prevotes.
+    TimeoutPrecommit,          // Timeout waiting for precommits.
 }
 
 // Message is the output of the state machine - proposals/votes
@@ -164,33 +164,36 @@ impl State {
     }
 
     // next progresses the state machine. It returns an updated State
-    // and an optional message.
+    // and an optional message. Commented numbers refer to line numbers
+    // in the spec paper.
     pub fn next(self, event: RoundEvent) -> (State, Option<Message>) {
         let (s, round, eround) = (self, self.round, event.round);
         let eqr = round == eround;
         match (s.step, event.event) {
-            // no round guards
+            // From NewRound. No round guards.
             (Step::NewRound, Event::NewRoundProposer(v)) => propose(s, eround, v), // 11/14
             (Step::NewRound, Event::NewRound) => schedule_timeout_propose(s, eround), // 11/20
 
-            // must equal current round
+            // From Propose. Must equal current round.
             (Step::Propose, Event::Proposal(v)) if eqr => prevote(s, v), // 22
             (Step::Propose, Event::ProposalInvalid) if eqr => prevote_nil(s), // 22/25, 28/31
             (Step::Propose, Event::ProposalPolka(vr, v)) if eqr => prevote_polka(s, vr, v), // 28
             (Step::Propose, Event::TimeoutPropose) if eqr => prevote_nil(s), // 57
+
+            // From Prevote. Must equal current round.
             (Step::Prevote, Event::PolkaAny) if eqr => schedule_timeout_prevote(s), // 34
-            (Step::Prevote, Event::PolkaNil) if eqr => precommit_nil(s), // 44
+            (Step::Prevote, Event::PolkaNil) if eqr => precommit_nil(s),            // 44
             (Step::Prevote, Event::PolkaValue(v)) if eqr => precommit(s, v), // 36/37 - NOTE: only once?
             (Step::Prevote, Event::TimeoutPrevote) if eqr => precommit_nil(s), // 61
+
+            // From Precommit. Must equal current round.
             (Step::Precommit, Event::PolkaValue(v)) if eqr => set_valid_value(s, v), // 36/42 - NOTE: only once?
-            (_, Event::PrecommitAny) if eqr => schedule_timeout_precommit(s),        // 47
-            (_, Event::TimeoutPrecommit) if eqr => round_skip(s, eround + 1),        // 65
 
-            // must be from higher round
+            // From all. Various round guards.
+            (_, Event::PrecommitAny) if eqr => schedule_timeout_precommit(s), // 47
+            (_, Event::TimeoutPrecommit) if eqr => round_skip(s, eround + 1), // 65
             (_, Event::RoundSkip) if round < eround => round_skip(s, eround), // 55
-
-            // no round guards
-            (_, Event::PrecommitValue(v)) => commit(s, eround, v), // 49
+            (_, Event::PrecommitValue(v)) => commit(s, eround, v),            // 49
             _ => (s, None),
         }
     }
