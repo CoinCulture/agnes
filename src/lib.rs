@@ -104,20 +104,19 @@ pub struct RoundEvent {
 
 // Event is a type of event. It carries any relevant data.
 pub enum Event {
-    NewRound,                  // Start a new round, not as proposer.
-    NewRoundProposer(Value),   // Start a new round and propose the Value.
-    Proposal(Value),           // Receive a proposal.
-    ProposalInvalid,           // Receive an invalid proposal.
-    ProposalPolka(i64, Value), // Receive a proposal with a polka.
-    PolkaAny,                  // Receive +2/3 prevotes for anything.
-    PolkaNil,                  // Receive +2/3 prevotes for nil.
-    PolkaValue(Value),         // Receive +2/3 prevotes for Value.
-    PrecommitAny,              // Receive +2/3 precommits for anything.
-    PrecommitValue(Value),     // Receive +2/3 precommits for Value.
-    RoundSkip,                 // Receive +1/3 votes from a higher round.
-    TimeoutPropose,            // Timeout waiting for proposal.
-    TimeoutPrevote,            // Timeout waiting for prevotes.
-    TimeoutPrecommit,          // Timeout waiting for precommits.
+    NewRound,                // Start a new round, not as proposer.
+    NewRoundProposer(Value), // Start a new round and propose the Value.
+    Proposal(i64, Value),    // Receive a proposal with possible pol_round.
+    ProposalInvalid,         // Receive an invalid proposal.
+    PolkaAny,                // Receive +2/3 prevotes for anything.
+    PolkaNil,                // Receive +2/3 prevotes for nil.
+    PolkaValue(Value),       // Receive +2/3 prevotes for Value.
+    PrecommitAny,            // Receive +2/3 precommits for anything.
+    PrecommitValue(Value),   // Receive +2/3 precommits for Value.
+    RoundSkip,               // Receive +1/3 votes from a higher round.
+    TimeoutPropose,          // Timeout waiting for proposal.
+    TimeoutPrevote,          // Timeout waiting for prevotes.
+    TimeoutPrecommit,        // Timeout waiting for precommits.
 }
 
 //---------------------------------------------------------------------
@@ -184,42 +183,46 @@ pub struct Timeout {
 // State Transition Function
 
 impl State {
-    // next transitions the state machine. It returns an updated State
-    // and an optional message. Commented numbers refer to line numbers
-    // in the spec paper.
-    pub fn next(self, event: RoundEvent) -> (State, Option<Message>) {
-        let (s, round, eround) = (self, self.round, event.round);
-        let eqr = round == eround;
-        match (s.step, event.event) {
-            // From NewRound. Must equal current round.
-            (Step::NewRound, Event::NewRoundProposer(v)) if eqr => propose(s, v), // 11/14
-            (Step::NewRound, Event::NewRound) if eqr => schedule_timeout_propose(s), // 11/20
+    // convenience fn to check if a proposal's pol_round is valid
+    fn valid_vr(self, vr: i64) -> bool {
+        vr >= -1 && vr < self.round
+    }
+}
 
-            // From Propose. Must equal current round.
-            (Step::Propose, Event::Proposal(v)) if eqr => prevote(s, v), // 22
-            (Step::Propose, Event::ProposalInvalid) if eqr => prevote_nil(s), // 22/25, 28/31
-            (Step::Propose, Event::ProposalPolka(vr, v)) if eqr => prevote_polka(s, vr, v), // 28
-            (Step::Propose, Event::TimeoutPropose) if eqr => prevote_nil(s), // 57
+// next transitions the state machine. It takes a state and an input event
+// and returns an updated state and output message.
+// Valid transitions result in at least a change to the state and/or an output message.
+// Commented numbers refer to line numbers in the spec paper.
+pub fn next(s: State, event: RoundEvent) -> (State, Option<Message>) {
+    let eqr = s.round == event.round;
+    match (s.step, event.event) {
+        // From NewRound. Event must be for current round.
+        (Step::NewRound, Event::NewRoundProposer(v)) if eqr => propose(s, v), // 11/14
+        (Step::NewRound, Event::NewRound) if eqr => schedule_timeout_propose(s), // 11/20
 
-            // From Prevote. Must equal current round.
-            (Step::Prevote, Event::PolkaAny) if eqr => schedule_timeout_prevote(s), // 34
-            (Step::Prevote, Event::PolkaNil) if eqr => precommit_nil(s),            // 44
-            (Step::Prevote, Event::PolkaValue(v)) if eqr => precommit(s, v), // 36/37 - NOTE: only once?
-            (Step::Prevote, Event::TimeoutPrevote) if eqr => precommit_nil(s), // 61
+        // From Propose. Event must be for current round.
+        (Step::Propose, Event::Proposal(vr, v)) if eqr && s.valid_vr(vr) => prevote(s, vr, v), // 22, 28
+        (Step::Propose, Event::ProposalInvalid) if eqr => prevote_nil(s), // 22/25, 28/31
+        (Step::Propose, Event::TimeoutPropose) if eqr => prevote_nil(s),  // 57
 
-            // From Precommit. Must equal current round.
-            (Step::Precommit, Event::PolkaValue(v)) if eqr => set_valid_value(s, v), // 36/42 - NOTE: only once?
+        // From Prevote. Event must be for current round.
+        (Step::Prevote, Event::PolkaAny) if eqr => schedule_timeout_prevote(s), // 34
+        (Step::Prevote, Event::PolkaNil) if eqr => precommit_nil(s),            // 44
+        (Step::Prevote, Event::PolkaValue(v)) if eqr => precommit(s, v), // 36/37 - NOTE: only once?
+        (Step::Prevote, Event::TimeoutPrevote) if eqr => precommit_nil(s), // 61
 
-            // From Commit. No more state transitions.
-            (Step::Commit, _) => (s, None),
+        // From Precommit. Event must be for current round.
+        (Step::Precommit, Event::PolkaValue(v)) if eqr => set_valid_value(s, v), // 36/42 - NOTE: only once?
 
-            // From all (except Commit). Various round guards.
-            (_, Event::PrecommitAny) if eqr => schedule_timeout_precommit(s), // 47
-            (_, Event::TimeoutPrecommit) if eqr => round_skip(s, eround + 1), // 65
-            (_, Event::RoundSkip) if round < eround => round_skip(s, eround), // 55
-            (_, Event::PrecommitValue(v)) => commit(s, eround, v),            // 49
-            _ => (s, None),
-        }
+        // From Commit. No more state transitions.
+        (Step::Commit, _) => (s, None),
+
+        // From all (except Commit). Various round guards.
+        (_, Event::PrecommitAny) if eqr => schedule_timeout_precommit(s), // 47
+        (_, Event::TimeoutPrecommit) if eqr => round_skip(s, event.round + 1), // 65
+        (_, Event::RoundSkip) if s.round < event.round => round_skip(s, event.round), // 55
+        (_, Event::PrecommitValue(v)) => commit(s, event.round, v),       // 49
+        _ => (s, None),
     }
 }
 
@@ -241,33 +244,22 @@ fn propose(s: State, v: Value) -> (State, Option<Message>) {
 //---------------------------------------------------------------------
 // Prevote
 
-// Received a complete proposal with new value - prevote the value,
-// unless we're locked on something else.
-// 22
-fn prevote(s: State, proposed: Value) -> (State, Option<Message>) {
-    let s = s.next_step();
-    let value = match s.locked {
-        Some(locked) if proposed != locked.value => None, // locked on something else
-        _ => Some(proposed),
-    };
-    (s, Some(Message::prevote(s.round, value)))
-}
-
-// Received a complete proposal with old (polka) value - prevote the value,
-// unless we're locked at a higher round.
-// 28
-fn prevote_polka(s: State, vr: i64, proposed: Value) -> (State, Option<Message>) {
+// Received a complete proposal - prevote the value,
+// unless we're locked on something else at a higher round.
+// 22, 28
+fn prevote(s: State, vr: i64, proposed: Value) -> (State, Option<Message>) {
     let s = s.next_step();
     let value = match s.locked {
         Some(locked) if locked.round <= vr => Some(proposed), // unlock and prevote
         Some(locked) if locked.value == proposed => Some(proposed), // already locked on value
-        _ => None,                                            // otherwise, prevote nil
+        Some(_) => None, // we're locked on a higher round with a different value, prevote nil
+        None => Some(proposed), // not locked, prevote the value
     };
     (s, Some(Message::prevote(s.round, value)))
 }
 
 // Received a complete proposal for an empty or invalid value, or timed out - prevote nil.
-// 22, 57
+// 22/25, 28/31, 57
 fn prevote_nil(s: State) -> (State, Option<Message>) {
     let s = s.next_step();
     (s, Some(Message::prevote(s.round, None)))
@@ -354,22 +346,22 @@ mod tests {
         let val = Value {};
         let v = Some(val);
         let s = State::new(1);
-        let (s, m) = s.next(RoundEvent {
+        let (s, m) = next(s, RoundEvent {
             round: 0,
             event: Event::NewRoundProposer(val),
         });
         assert_eq!(m.unwrap(), Message::proposal(0, val, -1));
-        let (s, m) = s.next(RoundEvent {
+        let (s, m) = next(s, RoundEvent {
             round: 0,
-            event: Event::Proposal(val),
+            event: Event::Proposal(-1, val),
         });
         assert_eq!(m.unwrap(), Message::prevote(0, v));
-        let (s, m) = s.next(RoundEvent {
+        let (s, m) = next(s, RoundEvent {
             round: 0,
             event: Event::PolkaValue(val),
         });
         assert_eq!(m.unwrap(), Message::precommit(0, v));
-        let (s, m) = s.next(RoundEvent {
+        let (s, m) = next(s, RoundEvent {
             round: 0,
             event: Event::PrecommitValue(val),
         });
