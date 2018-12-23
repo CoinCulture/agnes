@@ -43,14 +43,14 @@ impl State{
 
     fn set_locked(self, locked: Value) -> State{
         State{
-            locked: Some(RoundValue{round: self.round, value: locked}),
+            locked: Some(RoundValue::new(self.round, locked)),
             ..self
         }
     }
 
     fn set_valid(self, valid: Value) -> State{
         State{
-            valid: Some(RoundValue{round: self.round, value: valid}),
+            valid: Some(RoundValue::new(self.round, valid)),
             ..self
         }
     }
@@ -84,7 +84,7 @@ pub enum EventType {
     PolkaValue(Value), // Receive +2/3 prevotes for Value
     PrecommitAny, // Receive +2/3 precommits for anything
     PrecommitValue(Value), // Receive +2/3 precommits for Value
-    RoundSkip, // Skip to a higher round
+    RoundSkip, // Receive +1/3 votes from a higher round
     TimeoutPropose, // Timeout waiting for proposal
     TimeoutPrevote, // Timeout waiting for prevotes
     TimeoutPrecommit, // Timeout waiting for precommits
@@ -227,13 +227,6 @@ fn prevote(s: State, proposed: Value) -> (State, Option<Message>){
     (s, Some(Message::Prevote(Vote::new(s.round, value))))
 }
 
-// received a complete proposal for an empty or invalid value, or timed out.
-// 22, 57
-fn prevote_nil(s: State) -> (State, Option<Message>){
-    let s = s.set_step(RoundStep::Prevote);
-    (s, Some(Message::Prevote(Vote::new(s.round, None))))
-}
-
 // received a complete proposal with old (polka) value - prevote
 // 28
 fn prevote_polka(s: State, vr: i64, proposed: Value) -> (State, Option<Message>) {
@@ -244,6 +237,13 @@ fn prevote_polka(s: State, vr: i64, proposed: Value) -> (State, Option<Message>)
         _ => { None } // otherwise, prevote nil
     };
     (s, Some(Message::Prevote(Vote::new(s.round, value))))
+}
+
+// received a complete proposal for an empty or invalid value, or timed out.
+// 22, 57
+fn prevote_nil(s: State) -> (State, Option<Message>){
+    let s = s.set_step(RoundStep::Prevote);
+    (s, Some(Message::Prevote(Vote::new(s.round, None))))
 }
 
 
@@ -320,15 +320,15 @@ mod tests {
     fn happy_case() {
 
         let val = Value{};
-		let v = Some(val);
-		let s = State::new(1);
-		let (s, m) = s.next(Event{round:0, typ:EventType::NewRoundProposer(val)});
+        let v = Some(val);
+        let s = State::new(1);
+        let (s, m) = s.next(Event{round:0, typ:EventType::NewRoundProposer(val)});
         assert_eq!(m.unwrap(), Message::Proposal(Proposal::new(0, val, -1)));
-		let (s, m) = s.next(Event{round:0, typ:EventType::Proposal(val)});
+        let (s, m) = s.next(Event{round:0, typ:EventType::Proposal(val)});
         assert_eq!(m.unwrap(), Message::Prevote(Vote::new(0, v)));
-		let (s, m) = s.next(Event{round:0, typ:EventType::PolkaValue(val)});
+        let (s, m) = s.next(Event{round:0, typ:EventType::PolkaValue(val)});
         assert_eq!(m.unwrap(), Message::Precommit(Vote::new(0, v)));
-	    let (s, m) = s.next(Event{round:0, typ:EventType::PrecommitValue(val)});
+        let (s, m) = s.next(Event{round:0, typ:EventType::PrecommitValue(val)});
         assert_eq!(m.unwrap(), Message::Decision(RoundValue::new(0, val)));
 
         assert_eq!(s.step, RoundStep::Commit);
