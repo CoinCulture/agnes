@@ -96,8 +96,8 @@ impl State {
 // When applied successfully, it causes a state transition
 // to occur or a message to be returned.
 pub struct RoundEvent {
-    round: i64,
-    event: Event,
+    pub round: i64,
+    pub event: Event,
 }
 
 // Event is a type of event. It carries any relevant data.
@@ -156,8 +156,8 @@ impl Message {
 // Timeout is used to schedule timeouts at different steps in the round.
 #[derive(Debug, PartialEq)]
 pub struct Timeout {
-    round: i64,
-    step: Step,
+    pub round: i64,
+    pub step: Step,
 }
 
 //---------------------------------------------------------------------
@@ -169,7 +169,7 @@ impl State {
         vr >= -1 && vr < self.round
     }
 
-    fn apply(self, event: RoundEvent) -> (State, Option<Message>) {
+    pub fn apply(self, event: RoundEvent) -> (State, Option<Message>) {
         apply(self, event)
     }
 }
