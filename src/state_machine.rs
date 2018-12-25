@@ -1,9 +1,7 @@
+use super::Value;
+
 //---------------------------------------------------------------------
 // State
-
-// Value is what we want to agree on.
-#[derive(Copy, Clone, PartialEq, Debug)]
-pub struct Value {}
 
 // RoundValue contains a Value and associated Round.
 #[derive(Copy, Clone, PartialEq, Debug)]
@@ -187,13 +185,17 @@ impl State {
     fn valid_vr(self, vr: i64) -> bool {
         vr >= -1 && vr < self.round
     }
+
+    fn apply(self, event: RoundEvent) -> (State, Option<Message>) {
+        apply(self, event)
+    }
 }
 
-// next transitions the state machine. It takes a state and an input event
+// apply transitions the state machine. It takes a state and an input event
 // and returns an updated state and output message.
 // Valid transitions result in at least a change to the state and/or an output message.
 // Commented numbers refer to line numbers in the spec paper.
-pub fn next(s: State, event: RoundEvent) -> (State, Option<Message>) {
+fn apply(s: State, event: RoundEvent) -> (State, Option<Message>) {
     let eqr = s.round == event.round;
     match (s.step, event.event) {
         // From NewRound. Event must be for current round.
@@ -346,25 +348,37 @@ mod tests {
         let val = Value {};
         let v = Some(val);
         let s = State::new(1);
-        let (s, m) = next(s, RoundEvent {
-            round: 0,
-            event: Event::NewRoundProposer(val),
-        });
+        let (s, m) = apply(
+            s,
+            RoundEvent {
+                round: 0,
+                event: Event::NewRoundProposer(val),
+            },
+        );
         assert_eq!(m.unwrap(), Message::proposal(0, val, -1));
-        let (s, m) = next(s, RoundEvent {
-            round: 0,
-            event: Event::Proposal(-1, val),
-        });
+        let (s, m) = apply(
+            s,
+            RoundEvent {
+                round: 0,
+                event: Event::Proposal(-1, val),
+            },
+        );
         assert_eq!(m.unwrap(), Message::prevote(0, v));
-        let (s, m) = next(s, RoundEvent {
-            round: 0,
-            event: Event::PolkaValue(val),
-        });
+        let (s, m) = apply(
+            s,
+            RoundEvent {
+                round: 0,
+                event: Event::PolkaValue(val),
+            },
+        );
         assert_eq!(m.unwrap(), Message::precommit(0, v));
-        let (s, m) = next(s, RoundEvent {
-            round: 0,
-            event: Event::PrecommitValue(val),
-        });
+        let (s, m) = apply(
+            s,
+            RoundEvent {
+                round: 0,
+                event: Event::PrecommitValue(val),
+            },
+        );
         assert_eq!(m.unwrap(), Message::decision(0, val));
 
         assert_eq!(s.step, Step::Commit);
