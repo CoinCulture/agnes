@@ -1,4 +1,4 @@
-use super::Value;
+use super::{Proposal, Value, Vote};
 
 //---------------------------------------------------------------------
 // State
@@ -126,8 +126,7 @@ pub enum Event {
 pub enum Message {
     NewRound(i64),        // Move to the new round.
     Proposal(Proposal),   // Broadcast the proposal.
-    Prevote(Vote),        // Broadcast the prevote.
-    Precommit(Vote),      // Broadcast the precommit.
+    Vote(Vote),           // Broadcast the vote.
     Timeout(Timeout),     // Schedule the timeout.
     Decision(RoundValue), // Decide the value.
 }
@@ -141,10 +140,10 @@ impl Message {
         })
     }
     fn prevote(round: i64, value: Option<Value>) -> Message {
-        Message::Prevote(Vote { round, value })
+        Message::Vote(Vote::new_prevote(round, value))
     }
     fn precommit(round: i64, value: Option<Value>) -> Message {
-        Message::Precommit(Vote { round, value })
+        Message::Vote(Vote::new_precommit(round, value))
     }
     fn timeout(round: i64, step: Step) -> Message {
         Message::Timeout(Timeout { round, step })
@@ -152,22 +151,6 @@ impl Message {
     fn decision(round: i64, value: Value) -> Message {
         Message::Decision(RoundValue { round, value })
     }
-}
-
-// Proposal proposes a value in a round.
-// pol_round is -1 or the last round this value got a polka.
-#[derive(Debug, PartialEq)]
-pub struct Proposal {
-    round: i64,
-    value: Value,
-    pol_round: i64,
-}
-
-// Vote is a vote for a value in a round.
-#[derive(Debug, PartialEq)]
-pub struct Vote {
-    round: i64,
-    value: Option<Value>,
 }
 
 // Timeout is used to schedule timeouts at different steps in the round.

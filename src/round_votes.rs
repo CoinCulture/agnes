@@ -1,26 +1,4 @@
-use super::Value;
-
-//-------------------------------------------------------------------------
-// Vote
-
-#[derive(Copy, Clone)]
-pub enum VoteType {
-    Prevote,
-    Precommit,
-}
-
-#[derive(Copy, Clone)]
-pub struct Vote {
-    typ: VoteType,
-    weight: i64,
-    value: Option<Value>,
-}
-
-impl Vote {
-    pub fn new(typ: VoteType, weight: i64, value: Option<Value>) -> Vote {
-        Vote { typ, weight, value }
-    }
-}
+use super::{Value, Vote, VoteType};
 
 //-------------------------------------------------------------------------
 // VoteCount tallys all votes of the same type (eg. prevote or precommit)
@@ -65,14 +43,14 @@ impl VoteCount {
     }
 
     // Adds vote to internal counters and returns the highest threshold.
-    fn add_vote(&mut self, vote: Vote) -> Thresh {
+    fn add_vote(&mut self, vote: Vote, weight: i64) -> Thresh {
         match vote.value {
             Some(v) => {
                 // TODO: handle multi values
-                self.value.weight += vote.weight;
+                self.value.weight += weight;
                 self.value.value = v;
             }
-            None => self.nil += vote.weight,
+            None => self.nil += weight,
         }
 
         if is_quorum(self.value.weight, self.total) {
@@ -109,10 +87,10 @@ impl RoundVotes {
         }
     }
 
-    pub fn add_vote(&mut self, vote: Vote) -> Thresh {
+    pub fn add_vote(&mut self, vote: Vote, weight: i64) -> Thresh {
         match vote.typ {
-            VoteType::Prevote => self.prevotes.add_vote(vote),
-            VoteType::Precommit => self.precommits.add_vote(vote),
+            VoteType::Prevote => self.prevotes.add_vote(vote, weight),
+            VoteType::Precommit => self.precommits.add_vote(vote, weight),
         }
     }
 }
@@ -130,23 +108,24 @@ mod tests {
         let val = Some(v);
         let total = 4;
         let mut round_votes = RoundVotes::new(1, 0, total);
+        let weight = 1;
 
         // add a vote. nothing changes.
-        let vote = Vote::new(VoteType::Prevote, 1, val);
-        let thresh = round_votes.add_vote(vote);
+        let vote = Vote::new_prevote(0, val);
+        let thresh = round_votes.add_vote(vote, weight);
         assert_eq!(thresh, Thresh::Init);
 
         // add it again, nothing changes.
-        let thresh = round_votes.add_vote(vote);
+        let thresh = round_votes.add_vote(vote, weight);
         assert_eq!(thresh, Thresh::Init);
 
         // add a vote for nil, get Thresh::Any
-        let vote_nil = Vote::new(VoteType::Prevote, 1, None);
-        let thresh = round_votes.add_vote(vote_nil);
+        let vote_nil = Vote::new_prevote(0, None);
+        let thresh = round_votes.add_vote(vote_nil, weight);
         assert_eq!(thresh, Thresh::Any);
 
         // add vote for value, get Thresh::Value
-        let thresh = round_votes.add_vote(vote);
+        let thresh = round_votes.add_vote(vote, weight);
         assert_eq!(thresh, Thresh::Value(v));
     }
 }
