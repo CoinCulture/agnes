@@ -3,6 +3,7 @@ use super::round_votes::Thresh;
 use super::state_machine as sm;
 use super::{Proposal, Value, Vote, VoteType};
 
+// Executor executes valid consensus messages.
 struct Executor {
     votes: rv::RoundVotes,
     state: sm::State,
@@ -10,6 +11,9 @@ struct Executor {
     our_weight: i64,
 }
 
+// Message is a validated consensus message.
+// Sequeunces of messages lead to state transitions.
+// Messages may come from peers or be generated internally.
 enum Message {
     Proposal(Proposal),
     Vote(Vote, i64),
@@ -25,18 +29,14 @@ impl Executor {
         }
     }
 
-    // receive a proposal/vote from peer, or a timeout
+    // Apply a message. This includes proposals and votes received from
+    // peers, or timeouts generated internally.
+    // Some messages generate events that are applied to the state machine.
     pub fn apply(&mut self, msg: Message) {
-        // process msg, output event
-        let (round, event) = self.msg_to_event(msg);
-
-        let event = match event {
-            None => return,
-            Some(event) => event,
-        };
-
-        // apply event to state machine
-        self.state = self.apply_event(sm::RoundEvent { round, event })
+        // process msg. if it returns an event, apply to state machine
+        if let (round, Some(event)) = self.process_msg(msg) {
+            self.state = self.apply_event(sm::RoundEvent { round, event });
+        }
     }
 
     fn get_proposal(&self, r: i64) -> Option<Value> {
@@ -44,9 +44,8 @@ impl Executor {
     } // TODO: use a closure
 
     // for proposals and votes, add to data store and return triggered event, if any.
-    // for timeouts, just convert to event
-    fn msg_to_event(&mut self, msg: Message) -> (i64, Option<sm::Event>) {
-        // convert msg to event, if any
+    // for timeouts, just convert to event.
+    fn process_msg(&mut self, msg: Message) -> (i64, Option<sm::Event>) {
         let (round, event) = match msg {
             Message::Proposal(p) => (p.round, Some(sm::Event::Proposal(p.pol_round, p.value))),
             Message::Vote(v, weight) => {
@@ -75,6 +74,9 @@ impl Executor {
         (round, event)
     }
 
+    // apply an event to the state machine, calling process_msg on any
+    // returned messages. calls apply_event recursively if processing the returned
+    // messages results in more events. returns an updated state.
     fn apply_event(&mut self, event: sm::RoundEvent) -> sm::State {
         let s = self.state;
         let (s, msg) = s.apply(event);
@@ -94,20 +96,20 @@ impl Executor {
                 Some((round, Some(event)))
             }
             sm::Message::Proposal(p) => {
-                let (round, event) = self.msg_to_event(Message::Proposal(p));
+                let (round, event) = self.process_msg(Message::Proposal(p));
                 Some((round, event))
             }
             sm::Message::Vote(v) => {
-                let (round, event) = self.msg_to_event(Message::Vote(v, self.our_weight));
+                let (round, event) = self.process_msg(Message::Vote(v, self.our_weight));
                 Some((round, event))
             }
             sm::Message::Timeout(t) => {
-                // schedule timeout
+                // TODO: schedule timeout
                 None
             }
             sm::Message::Decision(v) => {
                 // commit v
-                // go to next height
+                // TODO: go to next height
                 None
             }
         };

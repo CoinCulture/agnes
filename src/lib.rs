@@ -1,3 +1,5 @@
+// Value is what the consensus algorithm seeks agreement on.
+// TODO: it should probably be a Trait - currently it's empty.
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct Value {}
 
@@ -26,19 +28,13 @@ pub struct Vote {
 
 impl Vote {
     pub fn new_prevote(round: i64, value: Option<Value>) -> Vote {
-        Vote {
-            typ: VoteType::Prevote,
-            round,
-            value,
-        }
+        let typ = VoteType::Prevote;
+        Vote { typ, round, value }
     }
 
     pub fn new_precommit(round: i64, value: Option<Value>) -> Vote {
-        Vote {
-            typ: VoteType::Precommit,
-            round,
-            value,
-        }
+        let typ = VoteType::Precommit;
+        Vote { typ, round, value }
     }
 }
 

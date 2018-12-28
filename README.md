@@ -1,6 +1,21 @@
-# Tendermint Consensus State Machine
+# Agnes
 
-This is an implementation of the Tendermint Consensus State Machine as specified in the
+Agnes is a BFT state-machine replication engine written in Rust.
+It uses the Tendermint consensus algorithm.
+
+## Code Structure
+
+The code is designed to be highly modular. Each module has a minimal number of
+concerns. An explicit goal is for algorithms and data structures to be as
+decoupled as possible from the structure of data sent on the wire to peers.
+This should greatly facilitate testing by reducing the size of the object
+graphs necessary to test core componentry. For instance, signature
+validation and proposer selection should not be required for testing 
+the logic of the consensus state machine.
+
+## Consensus State Machine
+
+The Consensus State Machine is an implementation of the Tendermint algorithm as specified in the
 [paper](https://arxiv.org/pdf/1807.04938.pdf). The state machine structure was inspired by
 the blog post, [Pretty State Machine Patterns in Rust](https://hoverbear.org/2016/10/12/rust-state-machine-pattern/) 
 and a [variation derived from it](https://www.reddit.com/r/rust/comments/57ccds/pretty_state_machine_patterns_in_rust/d8rhwq4/).

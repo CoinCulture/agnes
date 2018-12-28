@@ -1,7 +1,7 @@
 use super::{Value, Vote, VoteType};
 
 //-------------------------------------------------------------------------
-// VoteCount tallys all votes of the same type (eg. prevote or precommit)
+// Tally votes of the same type (eg. prevote or precommit)
 
 // ValueWeight represents a value and the weight of votes for it.
 struct ValueWeight {
@@ -9,7 +9,8 @@ struct ValueWeight {
     weight: i64,
 }
 
-// VoteCount tallys the votes for nil and for the value.
+// VoteCount tallys votes of the same type.
+// Votes are for nil or for some value.
 //(TODO: handle multiple values)
 struct VoteCount {
     nil: i64,           // weight of votes for nil
@@ -17,7 +18,7 @@ struct VoteCount {
     total: i64,
 }
 
-// Thresh represents the different quorum thresholds
+// Thresh represents the different quorum thresholds.
 #[derive(Debug, PartialEq)]
 pub enum Thresh {
     Init,         // no quorum
@@ -26,6 +27,7 @@ pub enum Thresh {
     Value(Value), // quorum for the value
 }
 
+// is_quorum returns true if value > (2/3)*total.
 fn is_quorum(value: i64, total: i64) -> bool {
     3 * value > 2 * total
 }
@@ -42,7 +44,7 @@ impl VoteCount {
         }
     }
 
-    // Adds vote to internal counters and returns the highest threshold.
+    // Add vote to internal counters and return the highest threshold.
     fn add_vote(&mut self, vote: Vote, weight: i64) -> Thresh {
         match vote.value {
             Some(v) => {
