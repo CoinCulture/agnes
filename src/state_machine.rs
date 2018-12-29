@@ -92,14 +92,6 @@ impl State {
 //---------------------------------------------------------------------
 // Inputs (Events)
 
-// RoundEvent contains an event and its round.
-// When applied successfully, it causes a state transition
-// to occur or a message to be returned.
-pub struct RoundEvent {
-    pub round: i64,
-    pub event: Event,
-}
-
 // Event is a type of event. It carries any relevant data.
 pub enum Event {
     NewRound,                // Start a new round, not as proposer.
@@ -169,8 +161,8 @@ impl State {
         vr >= -1 && vr < self.round
     }
 
-    pub fn apply(self, event: RoundEvent) -> (State, Option<Message>) {
-        apply(self, event)
+    pub fn apply(self, round: i64, event: Event) -> (State, Option<Message>) {
+        apply(self, round, event)
     }
 }
 
@@ -178,9 +170,9 @@ impl State {
 // and returns an updated state and output message.
 // Valid transitions result in at least a change to the state and/or an output message.
 // Commented numbers refer to line numbers in the spec paper.
-fn apply(s: State, event: RoundEvent) -> (State, Option<Message>) {
-    let eqr = s.round == event.round;
-    match (s.step, event.event) {
+fn apply(s: State, round: i64, event: Event) -> (State, Option<Message>) {
+    let eqr = s.round == round;
+    match (s.step, event) {
         // From NewRound. Event must be for current round.
         (Step::NewRound, Event::NewRoundProposer(v)) if eqr => propose(s, v), // 11/14
         (Step::NewRound, Event::NewRound) if eqr => schedule_timeout_propose(s), // 11/20
@@ -204,9 +196,9 @@ fn apply(s: State, event: RoundEvent) -> (State, Option<Message>) {
 
         // From all (except Commit). Various round guards.
         (_, Event::PrecommitAny) if eqr => schedule_timeout_precommit(s), // 47
-        (_, Event::TimeoutPrecommit) if eqr => round_skip(s, event.round + 1), // 65
-        (_, Event::RoundSkip) if s.round < event.round => round_skip(s, event.round), // 55
-        (_, Event::PrecommitValue(v)) => commit(s, event.round, v),       // 49
+        (_, Event::TimeoutPrecommit) if eqr => round_skip(s, round + 1),  // 65
+        (_, Event::RoundSkip) if s.round < round => round_skip(s, round), // 55
+        (_, Event::PrecommitValue(v)) => commit(s, round, v),             // 49
         _ => (s, None),
     }
 }
@@ -331,39 +323,14 @@ mod tests {
         let val = Value {};
         let v = Some(val);
         let s = State::new(1);
-        let (s, m) = apply(
-            s,
-            RoundEvent {
-                round: 0,
-                event: Event::NewRoundProposer(val),
-            },
-        );
+        let (s, m) = apply(s, 0, Event::NewRoundProposer(val));
         assert_eq!(m.unwrap(), Message::proposal(0, val, -1));
-        let (s, m) = apply(
-            s,
-            RoundEvent {
-                round: 0,
-                event: Event::Proposal(-1, val),
-            },
-        );
+        let (s, m) = apply(s, 0, Event::Proposal(-1, val));
         assert_eq!(m.unwrap(), Message::prevote(0, v));
-        let (s, m) = apply(
-            s,
-            RoundEvent {
-                round: 0,
-                event: Event::PolkaValue(val),
-            },
-        );
+        let (s, m) = apply(s, 0, Event::PolkaValue(val));
         assert_eq!(m.unwrap(), Message::precommit(0, v));
-        let (s, m) = apply(
-            s,
-            RoundEvent {
-                round: 0,
-                event: Event::PrecommitValue(val),
-            },
-        );
+        let (s, m) = apply(s, 0, Event::PrecommitValue(val));
         assert_eq!(m.unwrap(), Message::decision(0, val));
-
         assert_eq!(s.step, Step::Commit);
     }
 }

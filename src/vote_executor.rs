@@ -4,8 +4,8 @@ use super::state_machine as sm;
 use super::{Vote, VoteType};
 
 // VoteExecutor executes valid votes at a given height.
-// It adds votes to the set of votes and returns appropriate
-// events, if any.
+// It adds votes to the set of votes and applies any
+// resulting events to the state machine.
 struct VoteExecutor {
     votes: rv::RoundVotes, // TODO: more rounds
     state: sm::State,
@@ -25,11 +25,7 @@ impl VoteExecutor {
         match VoteExecutor::to_event(vote.typ, thresh) {
             None => None,
             Some(event) => {
-                let event = sm::RoundEvent {
-                    round: vote.round,
-                    event,
-                };
-                let (s, msg) = self.state.apply(event);
+                let (s, msg) = self.state.apply(vote.round, event);
                 self.state = s;
                 msg
             }
