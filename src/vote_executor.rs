@@ -3,35 +3,26 @@ use super::round_votes::Thresh;
 use super::state_machine as sm;
 use super::{Vote, VoteType};
 
-// VoteExecutor executes valid votes at a given height.
-// It adds votes to the set of votes and applies any
-// resulting events to the state machine.
-struct VoteExecutor {
+// VoteExecutor adds the vote and returns any event.
+// TODO: better name, doesn't execute anymore
+pub struct VoteExecutor {
     votes: rv::RoundVotes, // TODO: more rounds
-    state: sm::State,
 }
 
 impl VoteExecutor {
     pub fn new(height: i64, total_weight: i64) -> VoteExecutor {
         let votes = rv::RoundVotes::new(height, 0, total_weight); // TODO more rounds
-        let state = sm::State::new(height);
-        VoteExecutor { votes, state }
+        VoteExecutor { votes }
     }
 
     // Apply a vote. If it triggers an event, apply the event to the state machine,
-    // update the state, and return any result.
-    pub fn apply(&mut self, vote: Vote, weight: i64) -> Option<sm::Message> {
+    // returning the new state and any resulting message.
+    pub fn apply(&mut self, vote: Vote, weight: i64) -> Option<sm::Event> {
         let thresh = self.votes.add_vote(vote, weight);
-        match VoteExecutor::to_event(vote.typ, thresh) {
-            None => None,
-            Some(event) => {
-                let (s, msg) = self.state.apply(vote.round, event);
-                self.state = s;
-                msg
-            }
-        }
+        VoteExecutor::to_event(vote.typ, thresh)
     }
 
+    // map a vote type and threshold to a state machine event.
     fn to_event(typ: VoteType, thresh: Thresh) -> Option<sm::Event> {
         match (typ, thresh) {
             (_, Thresh::Init) => None,

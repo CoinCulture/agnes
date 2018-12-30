@@ -38,6 +38,7 @@ impl Vote {
     }
 }
 
+pub mod consensus_executor;
 pub mod round_votes;
 pub mod state_machine;
 pub mod vote_executor;
