@@ -123,13 +123,15 @@ pub enum Message {
     Decision(RoundValue), // Decide the value.
 }
 
+// convenience methods for creating new messages.
 impl Message {
     fn proposal(round: i64, value: Value, pol_round: i64) -> Message {
-        Message::Proposal(Proposal {
+        let proposal = Proposal {
             round,
             value,
             pol_round,
-        })
+        };
+        Message::Proposal(proposal)
     }
     fn prevote(round: i64, value: Option<Value>) -> Message {
         Message::Vote(Vote::new_prevote(round, value))
@@ -137,7 +139,7 @@ impl Message {
     fn precommit(round: i64, value: Option<Value>) -> Message {
         Message::Vote(Vote::new_precommit(round, value))
     }
-    fn timeout(round: i64, step: Step) -> Message {
+    fn timeout(round: i64, step: TimeoutStep) -> Message {
         Message::Timeout(Timeout { round, step })
     }
     fn decision(round: i64, value: Value) -> Message {
@@ -149,7 +151,15 @@ impl Message {
 #[derive(Debug, PartialEq)]
 pub struct Timeout {
     pub round: i64,
-    pub step: Step,
+    pub step: TimeoutStep,
+}
+
+// TimeoutStep is the step the timeout is for.
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum TimeoutStep {
+    Propose,
+    Prevote,
+    Precommit,
 }
 
 //---------------------------------------------------------------------
@@ -267,7 +277,7 @@ fn precommit_nil(s: State) -> (State, Option<Message>) {
 // 11/20
 fn schedule_timeout_propose(s: State) -> (State, Option<Message>) {
     let s = s.next_step();
-    (s, Some(Message::timeout(s.round, Step::Propose)))
+    (s, Some(Message::timeout(s.round, TimeoutStep::Propose)))
 }
 
 // We received a polka for any - schedule timeout prevote.
@@ -275,13 +285,13 @@ fn schedule_timeout_propose(s: State) -> (State, Option<Message>) {
 // NOTE: this should only be called once in a round, per the spec,
 // but it's harmless to schedule more timeouts
 fn schedule_timeout_prevote(s: State) -> (State, Option<Message>) {
-    (s, Some(Message::timeout(s.round, Step::Prevote)))
+    (s, Some(Message::timeout(s.round, TimeoutStep::Prevote)))
 }
 
 // We received +2/3 precommits for any - schedule timeout precommit.
 // 47
 fn schedule_timeout_precommit(s: State) -> (State, Option<Message>) {
-    (s, Some(Message::timeout(s.round, Step::Precommit)))
+    (s, Some(Message::timeout(s.round, TimeoutStep::Precommit)))
 }
 
 //---------------------------------------------------------------------
